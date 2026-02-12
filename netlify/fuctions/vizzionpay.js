@@ -5,7 +5,7 @@
 
 const axios = require('axios');
 
-const VIZZION_TOKEN = process.env.VIZZION_TOKEN || 'SEU_TOKEN_VIZZION_AQUI';
+const VIZZION_TOKEN = process.env.VIZZION_TOKEN || 'gb2g8chb6nu1b571aemq9fv4ddtreolxdwzgxma006i5ltht3pxxgvb639catpla';
 const VIZZION_BASE_URL = process.env.VIZZION_BASE_URL || 'https://api.vizzionpay.com/v1';
 
 /**
