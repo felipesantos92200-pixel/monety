@@ -1,17 +1,41 @@
 // ========================================
 // BIBLIOTECA VIZZIONPAY - API CLIENT
 // ========================================
+// Funções genéricas para integração com VizzionPay adaptadas para Netlify Functions
+
 const axios = require('axios');
 
-// Configuração das variáveis de ambiente
-// IMPORTANTE: O nome da variável do token foi ajustado conforme seu contexto
-const VIZZION_TOKEN = process.env.VIZZIONPAY_TOKEN; 
-const VIZZION_BASE_URL = process.env.VIZZION_BASE_URL || 'https://api.vizzionpay.com/v1';
-const SITE_URL = process.env.URL || 'http://localhost:8888'; // Fallback para local dev
+// Definição da Base URL correta da API
+const VIZZION_BASE_URL = process.env.VIZZION_BASE_URL || 'https://app.vizzionpay.com/api/v1';
 
-// Validação inicial para evitar erros silenciosos
-if (!VIZZION_TOKEN) {
-  console.warn('⚠️ AVISO: VIZZIONPAY_TOKEN não está definido nas variáveis de ambiente.');
+// Lógica para definir a Base URL do site (Produção vs Localhost Netlify)
+const SITE_URL = process.env.URL || 'http://localhost:8888';
+
+// Criação da instância configurada do Axios
+const apiClient = axios.create({
+  baseURL: VIZZION_BASE_URL,
+  timeout: 30000, // Timeout de 30 segundos (configurado para serverless)
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  }
+});
+
+/**
+ * Helper para validar se as chaves existem antes de chamar a API
+ * Injeta os headers dinamicamente para garantir compatibilidade Serverless.
+ */
+function validarCredenciais() {
+  const publicKey = process.env.VIZZION_PUBLIC_KEY;
+  const secretKey = process.env.VIZZION_SECRET_KEY;
+
+  if (!publicKey || !secretKey) {
+    throw new Error('As variáveis VIZZION_PUBLIC_KEY e/ou VIZZION_SECRET_KEY não estão definidas no ambiente da Netlify.');
+  }
+
+  // Define os headers de autenticação na instância do axios
+  apiClient.defaults.headers.common['x-public-key'] = publicKey;
+  apiClient.defaults.headers.common['x-secret-key'] = secretKey;
 }
 
 /**
@@ -20,118 +44,95 @@ if (!VIZZION_TOKEN) {
  * @returns {Promise<Object>} - { pixCode, qrImage, transactionId }
  */
 async function criarPagamentoPIX(data) {
+  validarCredenciais();
   const { amount, userId, userName, description } = data;
 
-  // Montagem do payload
+  // Definição da Callback URL com fallback para local
+  const callbackUrl = `${SITE_URL}/.netlify/functions/webhook-payment`;
+
+  // Montagem do Payload
   const payload = {
-    amount: parseFloat(amount).toFixed(2), // Garante formato 00.00
+    amount: parseFloat(amount), // Garante que seja número/float
     description: description || `Depósito Monety - ${userName}`,
     customer: {
       name: userName,
-      external_id: userId
+      external_id: String(userId) // Garante que seja string
     },
-    // Define o webhook para receber a confirmação
-    callback_url: `${SITE_URL}/.netlify/functions/webhook-payment`
+    callback_url: callbackUrl
   };
 
-  const endpoint = `${VIZZION_BASE_URL}/pix/payment`;
-
-  console.log(`🚀 [VizzionPay] Iniciando criação de PIX...`);
-  console.log(`📍 Endpoint: ${endpoint}`);
-  console.log(`📦 Payload enviado:`, JSON.stringify(payload, null, 2));
+  // LOGS DE DEPURAÇÃO (Antes do envio)
+  console.log('--- INICIANDO PAGAMENTO PIX ---');
+  console.log('Endpoint:', `${apiClient.defaults.baseURL}/pix/payment`);
+  console.log('Callback URL configurada:', callbackUrl);
+  console.log('Payload enviado:', JSON.stringify(payload, null, 2));
 
   try {
-    const response = await axios.post(
-      endpoint,
-      payload,
-      {
-        headers: {
-          'Authorization': `Bearer ${VIZZION_TOKEN}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        timeout: 10000 // Timeout de 10s para evitar travamento da function
-      }
-    );
-
-    console.log(`✅ [VizzionPay] Sucesso! Status: ${response.status}`);
-    // Log da resposta completa para debug (remova em produção se for muito verboso)
-    // console.log(`📄 Resposta:`, JSON.stringify(response.data, null, 2));
-
+    const response = await apiClient.post('/pix/payment', payload);
     const { data: paymentData } = response;
+    
+    console.log('Sucesso VizzionPay:', paymentData.id || paymentData.transaction_id);
 
-    // Normalização dos dados de retorno (trata diferentes formatos possíveis da API)
     return {
       success: true,
       pixCode: paymentData.pix_code || paymentData.qrcode || paymentData.emv,
-      qrImage: paymentData.qr_image || paymentData.qrcode_image || paymentData.imagem_qrcode,
+      qrImage: paymentData.qr_image || paymentData.qrcode_image,
       transactionId: paymentData.transaction_id || paymentData.id || paymentData.txid
     };
 
   } catch (error) {
-    // === TRATAMENTO DE ERRO DETALHADO ===
-    
-    let errorMessage = 'Falha ao conectar com VizzionPay';
-    let errorDetails = {};
-
+    // LOGS DETALHADOS DE ERRO PARA NETLIFY
+    console.error('--- ERRO VIZZION PAY (CRIAR PAGAMENTO) ---');
     if (error.response) {
-      // O servidor respondeu com um status fora de 2xx
-      console.error(`❌ [VizzionPay] Erro de API: ${error.response.status}`);
-      console.error(`DETAILS:`, JSON.stringify(error.response.data, null, 2));
+      console.error('Status HTTP:', error.response.status);
+      console.error('Dados do Erro (Response Body):', JSON.stringify(error.response.data, null, 2));
       
-      errorMessage = error.response.data?.message || error.response.data?.error || 'Erro na API VizzionPay';
-      errorDetails = error.response.data;
+      throw {
+        status: error.response.status,
+        message: error.response.data?.message || 'Erro na API VizzionPay ao criar pagamento',
+        details: error.response.data
+      };
     } else if (error.request) {
-      // A requisição foi feita mas não houve resposta
-      console.error(`❌ [VizzionPay] Sem resposta do servidor.`);
-      errorMessage = 'Sem resposta do gateway de pagamento (Timeout ou erro de rede)';
+      console.error('Sem resposta do servidor:', error.message);
+      throw new Error('O servidor da VizzionPay não respondeu a tempo ou está indisponível.');
     } else {
-      // Erro na configuração da requisição
-      console.error(`❌ [VizzionPay] Erro de configuração:`, error.message);
-      errorMessage = error.message;
+      console.error('Erro de configuração:', error.message);
+      throw new Error(`Erro interno na requisição: ${error.message}`);
     }
-
-    // Lança um erro que o create-payment.js conseguirá ler e retornar ao front
-    const complexError = new Error(errorMessage);
-    complexError.details = errorDetails; 
-    throw complexError;
   }
 }
 
 /**
  * Verificar status do pagamento
+ * @param {string} transactionId - ID da transação
+ * @returns {Promise<Object>} - { status, amount, paidAt }
  */
 async function verificarStatusPagamento(transactionId) {
+  validarCredenciais();
   try {
-    const response = await axios.get(
-      `${VIZZION_BASE_URL}/pix/payment/${transactionId}`,
-      {
-        headers: { 'Authorization': `Bearer ${VIZZION_TOKEN}` }
-      }
-    );
+    const response = await apiClient.get(`/pix/payment/${transactionId}`);
+    const { data } = response;
+
     return {
-      status: response.data.status,
-      amount: response.data.amount,
-      paidAt: response.data.paid_at || response.data.completed_at
+      status: data.status, // PENDING, COMPLETED, FAILED, EXPIRED
+      amount: data.amount,
+      paidAt: data.paid_at || data.completed_at
     };
   } catch (error) {
-    console.error(`Erro ao verificar status [${transactionId}]:`, error.response?.data || error.message);
-    throw new Error(error.response?.data?.message || 'Falha ao verificar status');
+    console.error(`Erro ao verificar status (${transactionId}):`, error.response?.data || error.message);
+    throw error.response?.data || new Error('Falha ao verificar status do pagamento');
   }
 }
 
 /**
- * Gerar QR Code
+ * Gerar QR Code (caso necessário separadamente)
+ * @param {string} pixCode - Código PIX copia e cola
+ * @returns {Promise<string|null>} - URL da imagem QR Code
  */
 async function gerarQRCode(pixCode) {
+  validarCredenciais();
   try {
-    const response = await axios.post(
-      `${VIZZION_BASE_URL}/pix/qrcode`,
-      { pix_code: pixCode },
-      {
-        headers: { 'Authorization': `Bearer ${VIZZION_TOKEN}` }
-      }
-    );
+    const response = await apiClient.post('/pix/qrcode', { pix_code: pixCode });
     return response.data.qr_image;
   } catch (error) {
     console.error('Erro ao gerar QR Code:', error.response?.data || error.message);
@@ -140,73 +141,98 @@ async function gerarQRCode(pixCode) {
 }
 
 /**
- * Consultar transação genérica
+ * Consultar transação
+ * @param {string} transactionId - ID da transação
+ * @returns {Promise<Object>} - Dados completos da transação
  */
 async function consultarTransacao(transactionId) {
+  validarCredenciais();
   try {
-    const response = await axios.get(
-      `${VIZZION_BASE_URL}/transactions/${transactionId}`,
-      {
-        headers: { 'Authorization': `Bearer ${VIZZION_TOKEN}` }
-      }
-    );
+    const response = await apiClient.get(`/transactions/${transactionId}`);
     return response.data;
   } catch (error) {
-    console.error('Erro ao consultar transação:', error.response?.data || error.message);
-    throw new Error('Falha ao consultar transação');
+    console.error(`Erro ao consultar transação (${transactionId}):`, error.response?.data || error.message);
+    throw error.response?.data || new Error('Falha ao consultar transação');
   }
 }
 
 /**
- * Criar Saque (Transferência)
+ * Criar saque PIX (transferência)
+ * @param {Object} data - { amount, pixKey, pixType, userId }
+ * @returns {Promise<Object>} - { transactionId, status }
  */
 async function criarSaquePIX(data) {
+  validarCredenciais();
   const { amount, pixKey, pixType, userId } = data;
+
+  const payload = {
+    amount: parseFloat(amount),
+    pix_key: pixKey,
+    pix_key_type: pixType, // email, cpf, phone, random
+    external_id: String(userId),
+    description: 'Saque Monety'
+  };
+
   try {
-    const response = await axios.post(
-      `${VIZZION_BASE_URL}/pix/transfer`,
-      {
-        amount: parseFloat(amount),
-        pix_key: pixKey,
-        pix_key_type: pixType,
-        external_id: userId,
-        description: 'Saque Monety'
-      },
-      {
-        headers: { 'Authorization': `Bearer ${VIZZION_TOKEN}` }
-      }
-    );
+    const response = await apiClient.post('/pix/transfer', payload);
+    const { data: transferData } = response;
+
     return {
       success: true,
-      transactionId: response.data.transaction_id || response.data.id,
-      status: response.data.status
+      transactionId: transferData.transaction_id || transferData.id,
+      status: transferData.status
     };
   } catch (error) {
-    console.error('Erro ao criar saque:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.message || 'Falha ao processar saque');
+    console.error('--- ERRO VIZZION PAY (CRIAR SAQUE) ---');
+    if (error.response) {
+      console.error('Status HTTP:', error.response.status);
+      console.error('Dados do Erro:', JSON.stringify(error.response.data, null, 2));
+    } else {
+      console.error('Erro na requisição:', error.message);
+    }
+    throw error.response?.data || new Error('Falha ao processar saque na VizzionPay');
   }
 }
 
+/**
+ * Enviar pagamento (após aprovação admin)
+ * @param {string} withdrawId - ID do saque no sistema
+ * @param {Object} data - { amount, pixKey, pixType }
+ * @returns {Promise<Object>} - { transactionId, status }
+ */
 async function enviarPagamento(withdrawId, data) {
-  return criarSaquePIX({ ...data, userId: withdrawId });
+  try {
+    const result = await criarSaquePIX({
+      ...data,
+      userId: withdrawId
+    });
+
+    return result;
+  } catch (error) {
+    console.error(`Erro ao enviar pagamento para withdrawId ${withdrawId}:`, error);
+    throw error;
+  }
 }
 
+/**
+ * Consultar status do saque
+ * @param {string} transactionId - ID da transação VizzionPay
+ * @returns {Promise<Object>} - { status, completedAt }
+ */
 async function consultarStatusSaque(transactionId) {
+  validarCredenciais();
   try {
-    const response = await axios.get(
-      `${VIZZION_BASE_URL}/pix/transfer/${transactionId}`,
-      {
-        headers: { 'Authorization': `Bearer ${VIZZION_TOKEN}` }
-      }
-    );
+    const response = await apiClient.get(`/pix/transfer/${transactionId}`);
+    const { data } = response;
+
     return {
-      status: response.data.status,
-      completedAt: response.data.completed_at,
-      failureReason: response.data.failure_reason
+      status: data.status, // PROCESSING, COMPLETED, FAILED
+      completedAt: data.completed_at,
+      failureReason: data.failure_reason
     };
   } catch (error) {
-    console.error('Erro consultar status saque:', error.response?.data || error.message);
-    throw new Error('Falha ao consultar status do saque');
+    console.error(`Erro ao consultar saque (${transactionId}):`, error.response?.data || error.message);
+    throw error.response?.data || new Error('Falha ao consultar status do saque');
   }
 }
 
