@@ -1,11 +1,9 @@
 // ========================================
 // NETLIFY FUNCTION: Verificar Status do Pagamento
 // ========================================
-// GET /.netlify/functions/check-payment?transactionId=xxx
-
 const { verificarStatusPagamento } = require('./vizzionpay');
 
-exports.handler = async (event, context) => {
+exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
@@ -13,45 +11,33 @@ exports.handler = async (event, context) => {
     'Content-Type': 'application/json'
   };
 
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers, body: '' };
-  }
-
-  if (event.httpMethod !== 'GET') {
-    return {
-      statusCode: 405,
-      headers,
-      body: JSON.stringify({ error: 'Método não permitido' })
-    };
-  }
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
+  if (event.httpMethod !== 'GET') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Método não permitido' }) };
 
   try {
     const { transactionId } = event.queryStringParameters;
 
     if (!transactionId) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: 'transactionId é obrigatório' })
-      };
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'transactionId é obrigatório' }) };
     }
 
-    const status = await verificarStatusPagamento(transactionId);
+    const statusInfo = await verificarStatusPagamento(transactionId);
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        ...status
+        status: statusInfo.status,
+        amount: statusInfo.amount,
+        payedAt: statusInfo.payedAt,
+        availableAt: statusInfo.availableAt
       })
     };
 
   } catch (error) {
-    console.error('❌ Erro ao verificar pagamento:', error);
-    
     return {
-      statusCode: 500,
+      statusCode: error.status || 500,
       headers,
       body: JSON.stringify({
         success: false,
