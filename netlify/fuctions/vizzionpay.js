@@ -146,8 +146,16 @@ async function consultarStatusSaque(transactionId) {
       payedAt: data.payedAt || data.completedAt
     };
   } catch (error) {
-    throw error.response?.data || new Error('Falha ao consultar status do saque');
-  }
+  console.error("========= ERRO COMPLETO VIZZION =========");
+  console.error("STATUS:", error.response?.status);
+  console.error("DATA:", JSON.stringify(error.response?.data, null, 2));
+  console.error("==========================================");
+
+  throw {
+    status: error.response?.status || 500,
+    message: error.response?.data?.message || "Erro na API VizzionPay",
+    details: error.response?.data || null
+  };
 }
 
 module.exports = {
