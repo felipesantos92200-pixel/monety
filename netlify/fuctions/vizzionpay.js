@@ -1,7 +1,7 @@
 // ========================================
 // BIBLIOTECA VIZZIONPAY - API CLIENT
 // ========================================
-
+require('dotenv').config();
 const axios = require('axios');
 
 const VIZZION_BASE_URL = process.env.VIZZION_BASE_URL || 'https://app.vizzionpay.com/api/v1';
