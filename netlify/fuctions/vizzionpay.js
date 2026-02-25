@@ -20,7 +20,7 @@ const apiClient = axios.create({
  * Helper para validar o token
  */
 function validarCredenciais() {
-  const token = process.env.VIZZION_TOKEN;
+  const token = process.env.VIZZION_SECRET_KEY;
 
   if (!token) {
     throw new Error('A variável VIZZION_TOKEN não está definida no ambiente.');
