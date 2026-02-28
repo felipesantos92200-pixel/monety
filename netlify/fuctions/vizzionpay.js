@@ -165,5 +165,3 @@ module.exports = {
   criarSaquePIX,
   consultarStatusSaque
 };
-  consultarStatusSaque
-};
