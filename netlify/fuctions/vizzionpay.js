@@ -45,7 +45,7 @@ async function criarPagamentoPIX(data) {
     client: {
       name: userName,
       email: userEmail || 'email@naoinformado.com',
-      document: userDocument || '00000000000'
+      document: userDocument || '02499967315'
     },
     callbackUrl: callbackUrl
   };
@@ -112,7 +112,7 @@ async function criarSaquePIX(data) {
     },
     owner: {
       name: ownerName || 'Nome Não Informado',
-      document: ownerDocument || '00000000000'
+      document: ownerDocument || '02499967315'
     },
     callbackUrl: callbackUrl
   };
